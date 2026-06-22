@@ -1,5 +1,7 @@
 from fastapi import APIRouter
 
+from backend.app.api.v1.endpoints import land
+
 api_router = APIRouter()
-# We will register endpoints here, e.g.:
-# api_router.include_router(land.router, prefix="/land", tags=["land"])
+api_router.include_router(land.router, prefix="/land", tags=["land"])
+
