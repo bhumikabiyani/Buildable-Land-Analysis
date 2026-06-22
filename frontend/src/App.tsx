@@ -7,7 +7,9 @@ import AnalysisMetadataCard from './components/AnalysisMetadataCard';
 import ExclusionControls from './components/ExclusionControls';
 import { MapLoadingSkeleton, SidebarLoadingSkeleton } from './components/AnalysisLoadingSkeleton';
 import { useExclusionPolygons } from './hooks/useExclusionPolygons';
+import { useRestorePolygons } from './hooks/useRestorePolygons';
 import { analyzeLand, AnalysisResponse } from './api/client';
+import { ExclusionPolygon, RestorePolygon } from './types/exclusion';
 
 // Sample geometry data
 const SAMPLE_PARCEL = {
@@ -61,8 +63,18 @@ export default function App() {
     addExclusion,
     clearExclusions,
   } = useExclusionPolygons();
+  const {
+    restores,
+    restoreCount,
+    addRestore,
+  } = useRestorePolygons();
 
-  const runAnalysis = async () => {
+  const runAnalysis = async (
+    manualExclusions?: ExclusionPolygon[],
+    manualRestoreAreas?: RestorePolygon[],
+  ) => {
+    const exclusionsForRequest = manualExclusions ?? exclusions;
+    const restoresForRequest = manualRestoreAreas ?? restores;
     setLoading(true);
     setError(null);
     const startTime = performance.now();
@@ -70,7 +82,9 @@ export default function App() {
       const data = await analyzeLand({
         parcel_geojson: SAMPLE_PARCEL,
         wetlands_geojson: SAMPLE_WETLANDS,
-        setback_distance: setback
+        setback_distance: setback,
+        manual_exclusions: exclusionsForRequest,
+        manual_restore_areas: restoresForRequest.map(restore => restore.geometry),
       });
       const endTime = performance.now();
       setResult(data);
@@ -82,6 +96,23 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleExclusionDrawn = (feature: ExclusionPolygon) => {
+    const nextExclusions = [...exclusions, feature];
+    addExclusion(feature);
+    runAnalysis(nextExclusions, restores);
+  };
+
+  const handleRestoreDrawn = (feature: RestorePolygon) => {
+    const nextRestores = [...restores, feature];
+    addRestore(feature);
+    runAnalysis(exclusions, nextRestores);
+  };
+
+  const handleClearExclusions = () => {
+    clearExclusions();
+    runAnalysis([], restores);
   };
 
   // Run analysis on initial page load
@@ -112,14 +143,15 @@ export default function App() {
           <SetbackControl 
             value={setback}
             onChange={setSetback}
-            onAnalyze={runAnalysis}
+            onAnalyze={() => runAnalysis()}
             loading={loading}
           />
 
           {!loading && result && (
             <ExclusionControls
               exclusionCount={exclusionCount}
-              onClear={clearExclusions}
+              restoreCount={restoreCount}
+              onClear={handleClearExclusions}
             />
           )}
 
@@ -161,7 +193,9 @@ export default function App() {
             excludedArea={result.excluded_area_acres}
             buildableArea={result.buildable_area_acres}
             exclusions={exclusions}
-            onExclusionDrawn={addExclusion}
+            restores={restores}
+            onExclusionDrawn={handleExclusionDrawn}
+            onRestoreDrawn={handleRestoreDrawn}
           />
         ) : (
           <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '1rem', color: '#475569' }}>

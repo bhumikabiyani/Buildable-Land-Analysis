@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
-import { PenTool } from 'lucide-react';
+import { PenLine, PenTool } from 'lucide-react';
 import { formatAcres } from '../utils/derivedMetrics';
-import { ExclusionPolygon } from '../types/exclusion';
+import { ExclusionPolygon, RestorePolygon } from '../types/exclusion';
 
 // ----------------------------------------------------------------
 // Type definitions
@@ -11,9 +11,14 @@ import { ExclusionPolygon } from '../types/exclusion';
 type GeoJsonFeatureCollection = GeoJSON.FeatureCollection<GeoJSON.Geometry>;
 
 const MANUAL_EXCLUSION_LAYER = 'manual-exclusions';
+const RESTORE_LAYER = 'restore-areas';
 const MANUAL_EXCLUSION_FILL = '#ef4444';
 const MANUAL_EXCLUSION_OPACITY = 0.7;
 const MANUAL_EXCLUSION_OUTLINE = '#ffffff';
+const RESTORE_FILL = '#0ea5e9';
+const RESTORE_OPACITY = 0.55;
+const RESTORE_OUTLINE = '#7dd3fc';
+type DrawingMode = 'exclusion' | 'restore' | null;
 
 interface AnalysisMapProps {
   /** GeoJSON for the full parcel boundary – rendered in blue */
@@ -26,8 +31,12 @@ interface AnalysisMapProps {
   buildableArea?: number;
   /** User-drawn exclusion polygons from useExclusionPolygons */
   exclusions?: ExclusionPolygon[];
+  /** User-drawn restore polygons from useRestorePolygons */
+  restores?: RestorePolygon[];
   /** Called when the user finishes drawing a polygon */
   onExclusionDrawn?: (feature: ExclusionPolygon) => void;
+  /** Called when the user finishes drawing a restore polygon */
+  onRestoreDrawn?: (feature: RestorePolygon) => void;
 }
 
 // ----------------------------------------------------------------
@@ -202,7 +211,11 @@ function toExclusionCollection(exclusions: ExclusionPolygon[]): GeoJSON.FeatureC
   return { type: 'FeatureCollection', features: exclusions };
 }
 
-function toExclusionPolygon(feature: GeoJSON.Feature): ExclusionPolygon | null {
+function toRestoreCollection(restores: RestorePolygon[]): GeoJSON.FeatureCollection<GeoJSON.Polygon> {
+  return { type: 'FeatureCollection', features: restores };
+}
+
+function toDrawnPolygon(feature: GeoJSON.Feature): ExclusionPolygon | null {
   if (feature.geometry?.type !== 'Polygon') return null;
   return {
     type: 'Feature',
@@ -222,23 +235,40 @@ export default function AnalysisMap({
   excludedArea,
   buildableArea,
   exclusions = [],
+  restores = [],
   onExclusionDrawn,
+  onRestoreDrawn,
 }: AnalysisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
   const onExclusionDrawnRef = useRef(onExclusionDrawn);
-  const [isDrawing, setIsDrawing] = useState(false);
+  const onRestoreDrawnRef = useRef(onRestoreDrawn);
+  const drawingModeRef = useRef<DrawingMode>(null);
+  const [drawingMode, setDrawingMode] = useState<DrawingMode>(null);
 
   useEffect(() => {
     onExclusionDrawnRef.current = onExclusionDrawn;
   }, [onExclusionDrawn]);
 
+  useEffect(() => {
+    onRestoreDrawnRef.current = onRestoreDrawn;
+  }, [onRestoreDrawn]);
+
   const startDrawExclusion = useCallback(() => {
     const draw = drawRef.current;
     if (!draw) return;
+    drawingModeRef.current = 'exclusion';
     draw.changeMode('draw_polygon');
-    setIsDrawing(true);
+    setDrawingMode('exclusion');
+  }, []);
+
+  const startDrawRestore = useCallback(() => {
+    const draw = drawRef.current;
+    if (!draw) return;
+    drawingModeRef.current = 'restore';
+    draw.changeMode('draw_polygon');
+    setDrawingMode('restore');
   }, []);
 
   // ── Initialize map once on mount ──────────────────────────────
@@ -261,11 +291,14 @@ export default function AnalysisMap({
     map.addControl(draw as unknown as maplibregl.IControl);
 
     const handleDrawCreate = (event: { features: GeoJSON.Feature[] }) => {
-      const polygon = toExclusionPolygon(event.features[0]);
+      const polygon = toDrawnPolygon(event.features[0]);
       if (!polygon) return;
 
-      console.log(polygon);
-      onExclusionDrawnRef.current?.(polygon);
+      if (drawingModeRef.current === 'restore') {
+        onRestoreDrawnRef.current?.(polygon);
+      } else {
+        onExclusionDrawnRef.current?.(polygon);
+      }
 
       const featureId = event.features[0].id;
       if (featureId !== undefined && featureId !== null) {
@@ -273,11 +306,15 @@ export default function AnalysisMap({
       }
 
       draw.changeMode('simple_select');
-      setIsDrawing(false);
+      drawingModeRef.current = null;
+      setDrawingMode(null);
     };
 
     const handleModeChange = (event: { mode: string }) => {
-      setIsDrawing(event.mode === 'draw_polygon');
+      if (event.mode !== 'draw_polygon') {
+        drawingModeRef.current = null;
+        setDrawingMode(null);
+      }
     };
 
     map.on('draw.create', handleDrawCreate);
@@ -296,6 +333,15 @@ export default function AnalysisMap({
         MANUAL_EXCLUSION_FILL,
         MANUAL_EXCLUSION_OPACITY,
         MANUAL_EXCLUSION_OUTLINE,
+        2,
+      );
+      upsertLayer(
+        map,
+        RESTORE_LAYER,
+        toRestoreCollection(restores),
+        RESTORE_FILL,
+        RESTORE_OPACITY,
+        RESTORE_OUTLINE,
         2,
       );
 
@@ -324,12 +370,21 @@ export default function AnalysisMap({
     upsertLayer(map, 'parcel', parcelGeoJson, '#3b82f6', 0.0, '#3b82f6', 3);
     upsertLayer(map, 'buildable', buildableGeoJson, '#22c55e', 0.4, '#16a34a', 1.5);
     upsertLayer(map, 'excluded', excludedGeoJson, '#ef4444', 0.6, '#dc2626', 1.5);
+    upsertLayer(
+      map,
+      RESTORE_LAYER,
+      toRestoreCollection(restores),
+      RESTORE_FILL,
+      RESTORE_OPACITY,
+      RESTORE_OUTLINE,
+      2,
+    );
 
     const bounds = computeBounds(parcelGeoJson, excludedGeoJson, buildableGeoJson);
     if (bounds) {
       map.fitBounds(bounds, { padding: 60, duration: 600 });
     }
-  }, [parcelGeoJson, excludedGeoJson, buildableGeoJson]);
+  }, [parcelGeoJson, excludedGeoJson, buildableGeoJson, restores]);
 
   // ── Update manual exclusion layer from React state ────────────
   useEffect(() => {
@@ -347,6 +402,22 @@ export default function AnalysisMap({
     );
   }, [exclusions]);
 
+  // ── Update restore layer from React state ─────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
+    upsertLayer(
+      map,
+      RESTORE_LAYER,
+      toRestoreCollection(restores),
+      RESTORE_FILL,
+      RESTORE_OPACITY,
+      RESTORE_OUTLINE,
+      2,
+    );
+  }, [restores]);
+
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: '400px' }}>
       <div
@@ -359,16 +430,27 @@ export default function AnalysisMap({
         }}
       />
 
-      {/* Draw Exclusion control */}
-      <button
-        type="button"
-        onClick={startDrawExclusion}
-        className={isDrawing ? 'btn-draw-exclusion btn-draw-exclusion--active' : 'btn-draw-exclusion'}
-        title="Draw a polygon exclusion on the map"
-      >
-        <PenTool size={16} />
-        {isDrawing ? 'Drawing…' : 'Draw Exclusion'}
-      </button>
+      {/* Drawing controls */}
+      <div className="draw-controls">
+        <button
+          type="button"
+          onClick={startDrawExclusion}
+          className={drawingMode === 'exclusion' ? 'btn-draw-exclusion btn-draw-exclusion--active' : 'btn-draw-exclusion'}
+          title="Draw a polygon exclusion on the map"
+        >
+          <PenTool size={16} />
+          {drawingMode === 'exclusion' ? 'Drawing...' : 'Draw Exclusion'}
+        </button>
+        <button
+          type="button"
+          onClick={startDrawRestore}
+          className={drawingMode === 'restore' ? 'btn-draw-restore btn-draw-restore--active' : 'btn-draw-restore'}
+          title="Draw a polygon restore area on the map"
+        >
+          <PenLine size={16} />
+          {drawingMode === 'restore' ? 'Drawing...' : 'Draw Restore'}
+        </button>
+      </div>
 
       {/* Floating Map Legend */}
       <div style={{
@@ -405,6 +487,12 @@ export default function AnalysisMap({
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.875rem', color: '#cbd5e1' }}>
             <div style={{ width: 14, height: 14, border: '1.5px solid #ffffff', borderRadius: '3px', background: 'rgba(239, 68, 68, 0.7)' }} />
             <span>Manual Exclusion ({exclusions.length})</span>
+          </div>
+        )}
+        {restores.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.875rem', color: '#cbd5e1' }}>
+            <div style={{ width: 14, height: 14, border: '1.5px solid #7dd3fc', borderRadius: '3px', background: 'rgba(14, 165, 233, 0.55)' }} />
+            <span>Restore Area ({restores.length})</span>
           </div>
         )}
       </div>

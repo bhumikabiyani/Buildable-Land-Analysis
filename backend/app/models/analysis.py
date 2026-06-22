@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
+from shapely.geometry import shape
 
 class AnalysisRequest(BaseModel):
     parcel_geojson: Dict[str, Any] = Field(
@@ -14,6 +15,14 @@ class AnalysisRequest(BaseModel):
         ...,
         description="Buffer setback distance around wetlands in meters.",
         ge=0.0
+    )
+    manual_exclusions: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Optional list of GeoJSON Feature polygons manually excluded by the user."
+    )
+    manual_restore_areas: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Optional list of GeoJSON Polygon geometries manually restored by the user."
     )
 
     @field_validator("parcel_geojson", "wetlands_geojson")
@@ -33,6 +42,65 @@ class AnalysisRequest(BaseModel):
         if geojson_type not in allowed_types:
             raise ValueError(f"Unsupported GeoJSON type '{geojson_type}'. Supported types: {allowed_types}")
             
+        return value
+
+    @staticmethod
+    def validate_polygon_geometry(geometry: Dict[str, Any], label: str) -> None:
+        if not isinstance(geometry, dict):
+            raise ValueError(f"Each {label} must include a geometry object.")
+
+        geometry_type = geometry.get("type")
+        if geometry_type not in {"Polygon", "MultiPolygon"}:
+            raise ValueError(f"{label.capitalize()} geometries must be Polygon or MultiPolygon.")
+
+        coordinates = geometry.get("coordinates")
+        if not coordinates:
+            raise ValueError(f"{label.capitalize()} geometry must include coordinates.")
+
+        try:
+            parsed_geometry = shape(geometry)
+        except Exception as err:
+            raise ValueError(f"{label.capitalize()} geometry is not valid GeoJSON: {err}")
+
+        if parsed_geometry.is_empty:
+            raise ValueError(f"{label.capitalize()} geometry cannot be empty.")
+        if parsed_geometry.geom_type not in {"Polygon", "MultiPolygon"}:
+            raise ValueError(f"{label.capitalize()} geometries must be Polygon or MultiPolygon.")
+        if not parsed_geometry.is_valid:
+            raise ValueError(f"{label.capitalize()} polygon geometry is invalid.")
+
+    @field_validator("manual_exclusions")
+    @classmethod
+    def validate_manual_exclusions(cls, value: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
+        """
+        Validates manually drawn exclusions as GeoJSON polygon Features.
+        """
+        if value is None:
+            return value
+
+        for feature in value:
+            if not isinstance(feature, dict):
+                raise ValueError("Each manual exclusion must be a GeoJSON Feature object.")
+            if feature.get("type") != "Feature":
+                raise ValueError("Each manual exclusion must have type 'Feature'.")
+
+            geometry = feature.get("geometry")
+            cls.validate_polygon_geometry(geometry, "manual exclusion")
+
+        return value
+
+    @field_validator("manual_restore_areas")
+    @classmethod
+    def validate_manual_restore_areas(cls, value: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
+        """
+        Validates manually drawn restore areas as GeoJSON polygon geometries.
+        """
+        if value is None:
+            return value
+
+        for geometry in value:
+            cls.validate_polygon_geometry(geometry, "manual restore area")
+
         return value
 
     model_config = {
@@ -80,7 +148,9 @@ class AnalysisRequest(BaseModel):
                         }
                     ]
                 },
-                "setback_distance": 50.0
+                "setback_distance": 50.0,
+                "manual_exclusions": [],
+                "manual_restore_areas": []
             }
         }
     }

@@ -2,6 +2,8 @@ export interface AnalysisRequest {
   parcel_geojson: GeoJSON.FeatureCollection;
   wetlands_geojson: GeoJSON.FeatureCollection;
   setback_distance: number;
+  manual_exclusions?: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>[];
+  manual_restore_areas?: GeoJSON.Polygon[];
 }
 
 export interface AnalysisResponse {

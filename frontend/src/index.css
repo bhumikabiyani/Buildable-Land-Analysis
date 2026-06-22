@@ -178,11 +178,18 @@ body {
   display: none !important;
 }
 
-.btn-draw-exclusion {
+.draw-controls {
   position: absolute;
   top: 16px;
   left: 16px;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.btn-draw-exclusion,
+.btn-draw-restore {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -210,4 +217,21 @@ body {
   border-color: #fbbf24;
   color: #fde68a;
   box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
+}
+
+.btn-draw-restore {
+  border-color: rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+}
+
+.btn-draw-restore:hover {
+  background: rgba(14, 165, 233, 0.15);
+  border-color: rgba(56, 189, 248, 0.6);
+}
+
+.btn-draw-restore--active {
+  background: rgba(14, 165, 233, 0.2);
+  border-color: #38bdf8;
+  color: #bae6fd;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
 }

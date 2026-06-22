@@ -2,10 +2,11 @@ import { Eraser, Shapes } from 'lucide-react';
 
 interface ExclusionControlsProps {
   exclusionCount: number;
+  restoreCount: number;
   onClear: () => void;
 }
 
-export default function ExclusionControls({ exclusionCount, onClear }: ExclusionControlsProps) {
+export default function ExclusionControls({ exclusionCount, restoreCount, onClear }: ExclusionControlsProps) {
   return (
     <div style={{
       padding: '1rem',
@@ -18,22 +19,48 @@ export default function ExclusionControls({ exclusionCount, onClear }: Exclusion
     }}>
       <div style={{
         display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        fontSize: '0.875rem',
-        color: '#94a3b8',
+        flexDirection: 'column',
+        gap: '0.5rem',
       }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', fontWeight: 500 }}>
-          <Shapes size={14} color="#fbbf24" />
-          Drawn Exclusions
-        </span>
-        <span style={{
-          color: exclusionCount > 0 ? '#fbbf24' : '#64748b',
-          fontWeight: 600,
-          fontFamily: 'monospace',
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: '0.875rem',
+          color: '#94a3b8',
         }}>
-          {exclusionCount}
-        </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', fontWeight: 500 }}>
+            <Shapes size={14} color="#fbbf24" />
+            Drawn Exclusions
+          </span>
+          <span style={{
+            color: exclusionCount > 0 ? '#fbbf24' : '#64748b',
+            fontWeight: 600,
+            fontFamily: 'monospace',
+          }}>
+            {exclusionCount}
+          </span>
+        </div>
+
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: '0.875rem',
+          color: '#94a3b8',
+        }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', fontWeight: 500 }}>
+            <Shapes size={14} color="#38bdf8" />
+            Drawn Restores
+          </span>
+          <span style={{
+            color: restoreCount > 0 ? '#38bdf8' : '#64748b',
+            fontWeight: 600,
+            fontFamily: 'monospace',
+          }}>
+            {restoreCount}
+          </span>
+        </div>
       </div>
 
       <button

@@ -7,6 +7,22 @@ router = APIRouter()
 analyzer = LandAnalyzer()
 
 
+def features_to_gdf(features: list, crs: str = "EPSG:4326") -> gpd.GeoDataFrame:
+    if not features:
+        return gpd.GeoDataFrame(geometry=[], crs=crs)
+    return gpd.GeoDataFrame.from_features(features, crs=crs)
+
+
+def geometries_to_gdf(geometries: list, crs: str = "EPSG:4326") -> gpd.GeoDataFrame:
+    if not geometries:
+        return gpd.GeoDataFrame(geometry=[], crs=crs)
+    features = [
+        {"type": "Feature", "properties": {}, "geometry": geometry}
+        for geometry in geometries
+    ]
+    return gpd.GeoDataFrame.from_features(features, crs=crs)
+
+
 @router.post("/analyze", response_model=AnalysisResponse)
 def analyze_land(request: AnalysisRequest):
     """
@@ -22,20 +38,24 @@ def analyze_land(request: AnalysisRequest):
             else:
                 raise HTTPException(status_code=400, detail="Invalid parcel GeoJSON format. Must contain features list.")
                 
-        parcel_gdf = gpd.GeoDataFrame.from_features(parcel_features, crs="EPSG:4326")
+        parcel_gdf = features_to_gdf(parcel_features)
         
         # 2. Parse Wetlands GeoJSON into GeoDataFrame
         wetlands_features = request.wetlands_geojson.get("features", [])
         if not wetlands_features and request.wetlands_geojson.get("type") == "Feature":
             wetlands_features = [request.wetlands_geojson]
             
-        wetlands_gdf = gpd.GeoDataFrame.from_features(wetlands_features, crs="EPSG:4326")
+        wetlands_gdf = features_to_gdf(wetlands_features)
+        manual_exclusions_gdf = features_to_gdf(request.manual_exclusions or [])
+        manual_restore_areas_gdf = geometries_to_gdf(request.manual_restore_areas or [])
         
         # 3. Call LandAnalyzer service
         result = analyzer.calculate_buildable_area(
             parcel_gdf=parcel_gdf,
             wetlands_gdf=wetlands_gdf,
-            setback_distance=request.setback_distance
+            setback_distance=request.setback_distance,
+            manual_exclusions_gdf=manual_exclusions_gdf,
+            manual_restore_areas_gdf=manual_restore_areas_gdf
         )
         
         return result

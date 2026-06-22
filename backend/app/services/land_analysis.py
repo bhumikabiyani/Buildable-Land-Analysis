@@ -1,7 +1,7 @@
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import geopandas as gpd
-from shapely.geometry import Polygon
+from shapely.geometry import GeometryCollection
 
 class LandAnalyzer:
     """
@@ -12,7 +12,9 @@ class LandAnalyzer:
         self,
         parcel_gdf: gpd.GeoDataFrame,
         wetlands_gdf: gpd.GeoDataFrame,
-        setback_distance: float
+        setback_distance: float,
+        manual_exclusions_gdf: Optional[gpd.GeoDataFrame] = None,
+        manual_restore_areas_gdf: Optional[gpd.GeoDataFrame] = None
     ) -> Dict[str, Any]:
         """
         Calculates buildable area by buffering wetlands, intersecting them with the parcel boundaries
@@ -22,6 +24,8 @@ class LandAnalyzer:
         - parcel_gdf (gpd.GeoDataFrame): GeoDataFrame representing the parcel.
         - wetlands_gdf (gpd.GeoDataFrame): GeoDataFrame representing the wetlands.
         - setback_distance (float): Buffer distance in meters (or coordinates units).
+        - manual_exclusions_gdf (Optional[gpd.GeoDataFrame]): User-drawn exclusion polygons.
+        - manual_restore_areas_gdf (Optional[gpd.GeoDataFrame]): User-drawn restore polygons.
 
         Returns:
         - Dict[str, Any]: Dictionary containing parcel area, excluded area, buildable area,
@@ -52,6 +56,16 @@ class LandAnalyzer:
         # Pre-repair geometries of the inputs
         cleaned_parcel = repair_gdf_geometries(parcel_gdf)
         cleaned_wetlands = repair_gdf_geometries(wetlands_gdf)
+        cleaned_manual_exclusions = repair_gdf_geometries(
+            manual_exclusions_gdf
+            if manual_exclusions_gdf is not None
+            else gpd.GeoDataFrame(geometry=[], crs=parcel_gdf.crs)
+        )
+        cleaned_manual_restore_areas = repair_gdf_geometries(
+            manual_restore_areas_gdf
+            if manual_restore_areas_gdf is not None
+            else gpd.GeoDataFrame(geometry=[], crs=parcel_gdf.crs)
+        )
 
         if cleaned_parcel.empty:
             raise ValueError("Input parcel GeoJSON does not contain any valid geometries.")
@@ -70,14 +84,21 @@ class LandAnalyzer:
             # Temporarily reproject to EPSG:5070 for area-preserving calculations
             working_parcel = cleaned_parcel.to_crs(target_projected_crs)
             working_wetlands = cleaned_wetlands.to_crs(target_projected_crs) if not cleaned_wetlands.empty else cleaned_wetlands
+            working_manual_exclusions = cleaned_manual_exclusions.to_crs(target_projected_crs) if not cleaned_manual_exclusions.empty else cleaned_manual_exclusions
+            working_manual_restore_areas = cleaned_manual_restore_areas.to_crs(target_projected_crs) if not cleaned_manual_restore_areas.empty else cleaned_manual_restore_areas
         else:
             # If already projected, still project to EPSG:5070 to ensure metric accuracy for CONUS region
             working_parcel = cleaned_parcel.to_crs(target_projected_crs)
             working_wetlands = cleaned_wetlands.to_crs(target_projected_crs) if not cleaned_wetlands.empty else cleaned_wetlands
+            working_manual_exclusions = cleaned_manual_exclusions.to_crs(target_projected_crs) if not cleaned_manual_exclusions.empty else cleaned_manual_exclusions
+            working_manual_restore_areas = cleaned_manual_restore_areas.to_crs(target_projected_crs) if not cleaned_manual_restore_areas.empty else cleaned_manual_restore_areas
 
         # Extract unified parcel shape and clean up geometry
         parcel_geometry = working_parcel.geometry.unary_union.buffer(0)
         parcel_area_sqm = parcel_geometry.area
+        excluded_geometry = GeometryCollection()
+        wetland_excluded_geometry = GeometryCollection()
+        wetland_inside_parcel = GeometryCollection()
 
         if not working_wetlands.empty:
             # Union wetlands geometries to handle overlapping features cleanly
@@ -91,7 +112,8 @@ class LandAnalyzer:
             buffered_wetlands = working_wetlands.geometry.buffer(setback_distance).unary_union.buffer(0)
 
             # 3. Calculate total excluded geometry (intersect full buffered wetlands with the parcel) and clean up
-            excluded_geometry = parcel_geometry.intersection(buffered_wetlands).buffer(0)
+            wetland_excluded_geometry = parcel_geometry.intersection(buffered_wetlands).buffer(0)
+            excluded_geometry = wetland_excluded_geometry
             excluded_area_sqm = excluded_geometry.area
 
             # 4. Calculate additional buffer area ONLY (total excluded zone minus original wetland area inside parcel)
@@ -105,8 +127,32 @@ class LandAnalyzer:
             # If no wetlands exist, all wetlands-related areas are zero
             wetland_area_sqm = 0.0
             additional_buffer_area_sqm = 0.0
-            excluded_area_sqm = 0.0
             buildable_geometry = parcel_geometry.buffer(0)
+
+        if not working_manual_exclusions.empty:
+            # User-drawn exclusions are clipped to the parcel before joining the excluded geometry.
+            manual_exclusion_geometry = working_manual_exclusions.geometry.unary_union.buffer(0)
+            manual_exclusion_inside_parcel = parcel_geometry.intersection(manual_exclusion_geometry).buffer(0)
+            excluded_geometry = excluded_geometry.union(manual_exclusion_inside_parcel).buffer(0)
+
+        buildable_geometry = parcel_geometry.difference(excluded_geometry).buffer(0)
+        restored_geometry = GeometryCollection()
+
+        if not working_manual_restore_areas.empty:
+            # Restore areas only affect land currently excluded from buildability.
+            restore_geometry = working_manual_restore_areas.geometry.unary_union.buffer(0)
+            restored_geometry = excluded_geometry.intersection(restore_geometry).buffer(0)
+            buildable_geometry = buildable_geometry.union(restored_geometry).buffer(0)
+            excluded_geometry = excluded_geometry.difference(restored_geometry).buffer(0)
+
+        excluded_area_sqm = excluded_geometry.area
+        additional_buffer_geometry = (
+            wetland_excluded_geometry
+            .difference(restored_geometry)
+            .difference(wetland_inside_parcel)
+            .buffer(0)
+        )
+        additional_buffer_area_sqm = additional_buffer_geometry.area
 
         # Calculate final buildable area in square meters
         buildable_area_sqm = buildable_geometry.area
@@ -166,4 +212,3 @@ class LandAnalyzer:
             "buildable_geojson": buildable_geojson,
             "excluded_geojson": excluded_geojson
         }
-
