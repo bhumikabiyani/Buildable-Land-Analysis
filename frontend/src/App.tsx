@@ -4,7 +4,9 @@ import AnalysisMap from './components/AnalysisMap';
 import AnalysisSummary from './components/AnalysisSummary';
 import SetbackControl from './components/SetbackControl';
 import AnalysisMetadataCard from './components/AnalysisMetadataCard';
+import ExclusionControls from './components/ExclusionControls';
 import { MapLoadingSkeleton, SidebarLoadingSkeleton } from './components/AnalysisLoadingSkeleton';
+import { useExclusionPolygons } from './hooks/useExclusionPolygons';
 import { analyzeLand, AnalysisResponse } from './api/client';
 
 // Sample geometry data
@@ -53,6 +55,12 @@ export default function App() {
   const [lastCompleted, setLastCompleted] = useState<string | null>(null);
   const [durationMs, setDurationMs] = useState<number | null>(null);
   const [setbackUsed, setSetbackUsed] = useState<number>(50);
+  const {
+    exclusions,
+    exclusionCount,
+    addExclusion,
+    clearExclusions,
+  } = useExclusionPolygons();
 
   const runAnalysis = async () => {
     setLoading(true);
@@ -108,6 +116,13 @@ export default function App() {
             loading={loading}
           />
 
+          {!loading && result && (
+            <ExclusionControls
+              exclusionCount={exclusionCount}
+              onClear={clearExclusions}
+            />
+          )}
+
           {error && (
             <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '8px', color: '#ef4444', fontSize: '0.875rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
               <Info size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
@@ -145,6 +160,8 @@ export default function App() {
             buildableGeoJson={result.buildable_geojson}
             excludedArea={result.excluded_area_acres}
             buildableArea={result.buildable_area_acres}
+            exclusions={exclusions}
+            onExclusionDrawn={addExclusion}
           />
         ) : (
           <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '1rem', color: '#475569' }}>
