@@ -1,37 +1,14 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-from typing import Dict, Any
 import geopandas as gpd
-from backend.app.services.land_analysis import LandAnalyzer
+from app.services.land_analysis import LandAnalyzer
+from app.models.analysis import AnalysisRequest, AnalysisResponse
 
 router = APIRouter()
 analyzer = LandAnalyzer()
 
-class LandAnalysisRequest(BaseModel):
-    parcel_geojson: Dict[str, Any] = Field(
-        ..., 
-        description="GeoJSON FeatureCollection representing the property parcel boundaries."
-    )
-    wetlands_geojson: Dict[str, Any] = Field(
-        ..., 
-        description="GeoJSON FeatureCollection representing protected wetlands within/around the parcel."
-    )
-    setback_distance: float = Field(
-        50.0, 
-        description="Buffer distance/setback in meters to exclude around wetlands.", 
-        ge=0.0
-    )
 
-class LandAnalysisResponse(BaseModel):
-    parcel_area_acres: float
-    excluded_area_acres: float
-    buildable_area_acres: float
-    buildable_geojson: Dict[str, Any]
-    excluded_geojson: Dict[str, Any]
-
-
-@router.post("/analyze", response_model=LandAnalysisResponse)
-def analyze_land(request: LandAnalysisRequest):
+@router.post("/analyze", response_model=AnalysisResponse)
+def analyze_land(request: AnalysisRequest):
     """
     Analyzes a parcel for buildable land area suitability by excluding setback buffers around wetlands.
     """

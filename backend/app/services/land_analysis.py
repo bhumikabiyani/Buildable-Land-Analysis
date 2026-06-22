@@ -27,9 +27,38 @@ class LandAnalyzer:
         - Dict[str, Any]: Dictionary containing parcel area, excluded area, buildable area,
                           and the buildable region's GeoJSON structure.
         """
+        from shapely import make_valid
+
+        def repair_gdf_geometries(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+            if gdf.empty:
+                return gdf
+            repaired_geoms = []
+            for geom in gdf.geometry:
+                if geom is None or geom.is_empty:
+                    continue
+                if not geom.is_valid:
+                    try:
+                        # Attempt automatic geometry fix (e.g. self-intersections)
+                        geom = make_valid(geom)
+                    except Exception:
+                        # If repair fails, fallback to buffer(0)
+                        geom = geom.buffer(0)
+                repaired_geoms.append(geom)
+            
+            if not repaired_geoms:
+                return gpd.GeoDataFrame(geometry=[], crs=gdf.crs)
+            return gpd.GeoDataFrame(geometry=repaired_geoms, crs=gdf.crs)
+
+        # Pre-repair geometries of the inputs
+        cleaned_parcel = repair_gdf_geometries(parcel_gdf)
+        cleaned_wetlands = repair_gdf_geometries(wetlands_gdf)
+
+        if cleaned_parcel.empty:
+            raise ValueError("Input parcel GeoJSON does not contain any valid geometries.")
+
         # Determine if inputs are in geographic coordinates (e.g., standard GPS latitude/longitude)
         # to ensure spatial measurements (areas and buffers) are accurately calculated.
-        is_geographic = parcel_gdf.crs is not None and parcel_gdf.crs.is_geographic
+        is_geographic = cleaned_parcel.crs is not None and cleaned_parcel.crs.is_geographic
 
         # We use EPSG:5070 (NAD83 / Conus Albers) for projected calculations.
         # EPSG:3857 (Web Mercator) is a conformal projection that severely distorts area calculations
@@ -39,12 +68,12 @@ class LandAnalyzer:
 
         if is_geographic:
             # Temporarily reproject to EPSG:5070 for area-preserving calculations
-            working_parcel = parcel_gdf.to_crs(target_projected_crs)
-            working_wetlands = wetlands_gdf.to_crs(target_projected_crs) if not wetlands_gdf.empty else wetlands_gdf
+            working_parcel = cleaned_parcel.to_crs(target_projected_crs)
+            working_wetlands = cleaned_wetlands.to_crs(target_projected_crs) if not cleaned_wetlands.empty else cleaned_wetlands
         else:
             # If already projected, still project to EPSG:5070 to ensure metric accuracy for CONUS region
-            working_parcel = parcel_gdf.to_crs(target_projected_crs)
-            working_wetlands = wetlands_gdf.to_crs(target_projected_crs) if not wetlands_gdf.empty else wetlands_gdf
+            working_parcel = cleaned_parcel.to_crs(target_projected_crs)
+            working_wetlands = cleaned_wetlands.to_crs(target_projected_crs) if not cleaned_wetlands.empty else cleaned_wetlands
 
         # Extract unified parcel shape and clean up geometry
         parcel_geometry = working_parcel.geometry.unary_union.buffer(0)
@@ -94,11 +123,33 @@ class LandAnalyzer:
             buildable_output = buildable_gdf.to_crs("EPSG:4326")
             excluded_output = excluded_gdf.to_crs("EPSG:4326")
 
+        # Simplify output geometries to reduce GeoJSON response size.
+        # Buffer operations produce many intermediate vertices (e.g., curved edges from circular buffers).
+        # We apply Ramer-Douglas-Peucker simplification with preserve_topology=True so that:
+        #  - Shared boundaries are not broken (topology is preserved)
+        #  - Polygons remain valid closed rings
+        #  - Visual fidelity is maintained at typical web map zoom levels
+        # Tolerance of 0.00001° ≈ 1 meter at mid-latitudes — safe for property-scale mapping.
+        SIMPLIFY_TOLERANCE = 0.00001
+
+        def simplify_gdf(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+            gdf = gdf.copy()
+            gdf["geometry"] = gdf["geometry"].simplify(
+                tolerance=SIMPLIFY_TOLERANCE,
+                preserve_topology=True
+            )
+            return gdf
+
+        buildable_output = simplify_gdf(buildable_output)
+        excluded_output = simplify_gdf(excluded_output)
+
         # Conversion: 1 square meter = 0.000247105 acres
         SQM_TO_ACRES = 0.000247105
         
         # Calculate final output values in acres
         parcel_area_acres = parcel_area_sqm * SQM_TO_ACRES
+        wetland_area_acres = wetland_area_sqm * SQM_TO_ACRES
+        wetland_buffer_area_acres = additional_buffer_area_sqm * SQM_TO_ACRES
         excluded_area_acres = excluded_area_sqm * SQM_TO_ACRES
         buildable_area_acres = buildable_area_sqm * SQM_TO_ACRES
 
@@ -108,6 +159,8 @@ class LandAnalyzer:
 
         return {
             "parcel_area_acres": parcel_area_acres,
+            "wetland_area_acres": wetland_area_acres,
+            "wetland_buffer_area_acres": wetland_buffer_area_acres,
             "excluded_area_acres": excluded_area_acres,
             "buildable_area_acres": buildable_area_acres,
             "buildable_geojson": buildable_geojson,
