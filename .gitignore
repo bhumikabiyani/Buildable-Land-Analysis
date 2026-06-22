@@ -1,0 +1,43 @@
+# OS files
+.DS_Store
+Thumbs.db
+*.db
+
+# Frontend Dependencies & Build Output
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.eslintcache
+
+# Backend Dependencies, Environments & Caches
+backend/__pycache__/
+backend/*.py[cod]
+backend/*$py.class
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.coverage
+backend/htmlcov/
+backend/.venv/
+backend/venv/
+backend/ENV/
+backend/env/
+
+# IDE / Editor configuration
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Environments & Secret Configurations
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
